@@ -1,0 +1,145 @@
+.___________. _______ .___  ___.      ___          __  
+|           ||   ____||   \/   |     /   \        /_ | 
+`---|  |----`|  |__   |  \  /  |    /  ^  \        | | 
+    |  |     |   __|  |  |\/|  |   /  /_\  \       | | 
+    |  |     |  |____ |  |  |  |  /  _____  \      | | 
+    |__|     |_______||__|  |__| /__/     \__\     |_| 
+
+Nume   : Maftei Stefan - Radu
+Grupa  : 324CD
+Materie: PC
+
+
+
+=== ksender.c ===
+
+	In acest fisier au loc transmiterile de mesaje spre receptor de catre
+emitator. Astfel se trimite intai pachetul send-init, apoi in caz de succes se
+retin caracteristicile receptorului.
+	Se trimit fisierele astfel: intai file-header-ul, apoi file-data. Dupa
+fiecare fisier se trimite un end of file care anunta sfarsitul transmiterii
+unui fisier. Daca nu mai exista niciun fisier se incheie transmisiunea prin
+transmiterea unui transmission-end.
+
+1) Send-Init
+
+	Pachetul Send-Init se initializeaza, completand campurile necesare in
+campul data. Se formeaza mesajul, cu lungimea sa, se calculeaza crc-ul,
+adaugandu-se si acesta mesajului. Se trimite receptorului, asteptand un mesaj
+de confirmare ACK. Acesta trimite de maxim 3 ori acelasi pachet in caz de
+pierdere.
+	Daca se primeste un mesaj NAK se reinitializeaza variabila contor
+pentru numarul de retransmiteri a aceluiasi pachet, deoarece in caz de NAK se
+actualizeaza numarul de secventa si odata cu acesta si crc-ul. Apoi se formeaza
+din nou mesajul care se transmite receptorului.
+	Odata primit mesajul ACK, se retin din el caracteristicile maxl si
+timeout ale receptorului. Dupa 3 transmiteri ale aceluiasi pachet,
+emitatorul intra in TIMEOUT, mesajul primit fiind NULL (nu s-a primit).
+
+2) File-Header
+
+	Pentru fiecare fisier se va trimite un pachet File-Header care contine
+in campul data numele fisierului. La fel ca in cazul Send-Init se vor efectua
+aceeasi pasi pana se primeste mesajul ACK sau intra in TIMEOUT.
+
+3) File-Data
+
+	Se deschide fisierul respectiv spre a fi citit. Se citeste intr-un
+buffer maxim maxl bytes care se adauga in campul data si apoi se formeaza
+mesajul care va fi transmis sub forma de pachet File-Data. Se efectueaza
+aceeasi procedura ca la Send-Init, pana se primeste mesajul ACK sau intra in
+TIMEOUT.
+	Se vor trimite mesaje de tipul File-Data pana cand s-au citit toti
+bytes-ii din fisierul respectiv.
+
+4) File-End
+
+	Dupa fiecare fisier se va trimite un pachet File-End care marcheaza
+sfarsitul transmiterii unui fisier. Se efectueaza aceeasi procedura ca la
+Send-Init, pana se primeste mesajul ACK sau intra in TIMEOUT.
+
+5) Transmission-End
+
+	Dupa trasnmiterea tuturor fisierelor se trimite un pachet
+Transmission-End care marcheaza incheierea transmisiunii dintre emitator si
+receptor. Se efectueaza aceeasi procedura ca la Send-Init, pana se primeste
+mesajul ACK sau intra in TIMEOUT.
+
+Mentiuni:
+	- Am utilizat functia senderMessageTransmission() care primea mesajele
+transmise de catre receptor, si le analiza, trimitand un nou pachet
+actualizat in caz de NAK. Daca pachetele erau pierdute se retrimitea
+din nou pachetul. Dupa 3 trimiteri ale aceluiasi pachet emitatorul intra
+in TIMEOUT;
+	- Deoarece pe calea receptor - emitator nu se corup mesaje, nu se vor
+verifica crc-urile mesajelor ACK si NAK;
+	- Mereu se actualizeaza numarul de secventa in mod corespunzator.
+
+
+
+=== kreceiver.c ===
+
+	In acest fisier receptorul primeste mesajele transmise de catre
+emitator. Acesta analizeaza mesajele verificand crc-ul primit si crc-ul
+calculat la receptor. Daca acestea coincid se trimite un pachet ACK, altfel
+se trimite un pachet NAK.
+	In functie de tipul de mesaj primit se efectueaza diferite operatii:
+deschidere fisier, scriere in fisier, incheiere scriere.
+
+1) Send-Init
+
+	Receptorul primeste mesajul de tip Send-Init de la emitator. Verifica
+prin crc-uri corectitudinea mesajului: daca acestea coincid se trimite un
+mesaj ACK, iar in caz contrar se trimite un mesaj de tip NAK. Acesta asteapta
+un mesaj de maxim 3 * TIMEOUT (timeout fiind o constanta), daca mesajul nu
+a ajuns in acest interval receptorul intra in TIMEOUT.
+	Odata primit Send-Init-ul corect se vor retine caracteristicile
+emitatorului (maxl si timeout). De mentionat ca mesajul ACK transmis de
+receptor contine caracteristicile receptorului.
+
+2) Transmisiunea
+
+	Dupa primirea Send-Init-ului, fiecare mesaj receptionat va fi verificat
+daca e corect (prin crc-uri) apoi se aplica urmatoarea logica:
+	- daca tipul mesajului e File-Header atunci se creeaza numele nou
+pentru mesajul receptionat, altfel daca el este de tipul Transmission-End se va
+incheia transmisiunea, deoarece toata transmisiunea are loc pana la primirea
+acestui tip de mesaj;
+	- daca tipul mesajului e File-Data atunci se scrie in fisierul creat
+inainte (acel pas a fost efctuat la primirea unui pachet File-Header), altfel
+daca el este de tipul File-End se va inchide fisierul deja deschis si scris,
+trecandu-se la verificarea urmatorului fisier (daca acesta exista si va fi
+trimis) sau Transmission-End.
+
+Mentiuni:
+	- Am utilizat doua tipuri de mesaje: ACK si NAK in cadrul receptorului
+pentru a fi mai sugestiv;
+	- Am utilizat functia reconstruct_CRC() pentru a calcula in receptor
+valoarea crc-ului transmis de catre emitator. Acesta fiind in format
+little-endian intr-un sir de caractere va fi convertit corespunzator in
+unsigned short;
+	- Am uitilizat functia receiverMessageTransmission() care efectueaza
+analiza pachetelor primite si trimite ACK, respectiv NAK, in functie de caz.
+Tot aici se verifica tipurile File-End si Transmission-End si se contorizeaza
+timpul asteptat al mesajelor primite (daca se asteapta de 3 * TIMEOUT timp un
+pachet, emitatorul intra in TIMEOUT);
+	- Deoarece pe calea receptor - emitator nu se pierd mesaje, nu se vor
+retransmite ACK sau NAK (acestea ajung cu siguranta la destinatie);
+	- Mereu se actualizeaza numarul de secventa in mod corespunzator.
+
+
+
+=== lib.h ===
+
+	In acest fisier sunt definite tipurile de pachet, constante necesare
+in cadrul programului si structura de date pentru un pachet. De asemenea
+sunt definite structura unui mesaj si structura tipului de date din cadrul
+pachetulu Send-Init.
+	Functia initializeSPacket() initializeaza campul data dintr-un pachet
+de tipul Send-Init.
+	Functia prepareMessage() pregateste un mesaj spre a fi transmis pe
+calea emitator - receptor sau pe calea receptor - emitator. Intai se
+initializeaza pachetul, apoi se muta informatia pachetului intr-un mesaj,
+se calculeaza crc-ul si se adauga mesajului. Aceasta functie este folosita
+atat in emitator, cat si in receptor pentru mesajele transmise, respectiv
+mesajele ACK si NAK.
